@@ -345,32 +345,49 @@ export function createMeeting(input: NewMeetingInput): Meeting {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
-  insertMeeting.run(
-    meeting.id,
-    meeting.title,
-    meeting.date,
-    meeting.accountId,
-    stringify(meeting.attendees),
-    stringify(meeting.internalTeam),
-    meeting.type,
-    meeting.summary,
-    stringify(meeting.topics),
-    stringify(meeting.decisions),
-    stringify(meeting.actionItems),
-    stringify(meeting.risks),
-    stringify(meeting.opportunities),
-    stringify(meeting.nextSteps),
-    meeting.owner
-  );
+  database.exec("BEGIN IMMEDIATE TRANSACTION;");
 
-  database.prepare(`
-    UPDATE accounts
-    SET meetings_count = meetings_count + 1,
-        action_items_open = action_items_open + ?
-    WHERE id = ?
-  `).run(meeting.actionItems.length, meeting.accountId);
+  try {
+    insertMeeting.run(
+      meeting.id,
+      meeting.title,
+      meeting.date,
+      meeting.accountId,
+      stringify(meeting.attendees),
+      stringify(meeting.internalTeam),
+      meeting.type,
+      meeting.summary,
+      stringify(meeting.topics),
+      stringify(meeting.decisions),
+      stringify(meeting.actionItems),
+      stringify(meeting.risks),
+      stringify(meeting.opportunities),
+      stringify(meeting.nextSteps),
+      meeting.owner
+    );
 
-  return meeting;
+    database.prepare(`
+      UPDATE accounts
+      SET meetings_count = meetings_count + 1,
+          action_items_open = action_items_open + ?
+      WHERE id = ?
+    `).run(meeting.actionItems.length, meeting.accountId);
+
+    database.exec("COMMIT;");
+  } catch (error) {
+    database.exec("ROLLBACK;");
+    throw error;
+  }
+
+  database.exec("PRAGMA wal_checkpoint(FULL);");
+
+  const savedMeeting = readMeetingById(database, meeting.id);
+
+  if (!savedMeeting) {
+    throw new Error("Meeting insert could not be verified in SQLite.");
+  }
+
+  return savedMeeting;
 }
 
 function readAccounts(database: DatabaseSync): Account[] {
@@ -404,7 +421,11 @@ function readAccounts(database: DatabaseSync): Account[] {
 function readMeetings(database: DatabaseSync): Meeting[] {
   const rows = database.prepare("SELECT * FROM meetings ORDER BY date ASC").all() as Record<string, unknown>[];
 
-  return rows.map((row) => ({
+  return rows.map(mapMeetingRow);
+}
+
+function mapMeetingRow(row: Record<string, unknown>): Meeting {
+  return {
     id: String(row.id),
     title: String(row.title),
     date: String(row.date),
@@ -420,7 +441,12 @@ function readMeetings(database: DatabaseSync): Meeting[] {
     opportunities: parseJson<string[]>(row.opportunities, []),
     nextSteps: parseJson<string[]>(row.next_steps, []),
     owner: String(row.owner)
-  }));
+  };
+}
+
+function readMeetingById(database: DatabaseSync, id: string): Meeting | null {
+  const row = database.prepare("SELECT * FROM meetings WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+  return row ? mapMeetingRow(row) : null;
 }
 
 function readTranscripts(database: DatabaseSync): Transcript[] {
