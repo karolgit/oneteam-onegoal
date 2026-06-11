@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2048 72" preserveAspectRatio="none">
+  <defs>
+    <pattern id="speckles" width="16" height="16" patternUnits="userSpaceOnUse">
+      <circle cx="3" cy="4" r="1" fill="#2b2b2b" opacity=".28"/>
+      <circle cx="12" cy="10" r="1" fill="#ffffff" opacity=".45"/>
+      <circle cx="7" cy="14" r=".8" fill="#2b2b2b" opacity=".22"/>
+    </pattern>
+  </defs>
+  <rect width="2048" height="72" fill="#d7d1c7"/>
+  <path d="M0 0h245l80 72H0z" fill="#f1cf65"/>
+  <path d="M64 0h110l102 72H166z" fill="#6ea0a0"/>
+  <path d="M189 0h54l98 72h-53z" fill="#1f4242"/>
+  <path d="M486 0h160l108 72H594z" fill="#7faeaa"/>
+  <path d="M670 0h88l92 72h-88z" fill="#2f3334"/>
+  <path d="M980 0h204l-74 72H906z" fill="#ece7dd"/>
+  <path d="M1168 0h122l-80 72h-122z" fill="#3b3b3b"/>
+  <path d="M1265 0h285l-84 72h-285z" fill="#89b7b2"/>
+  <path d="M1484 0h50l-78 72h-50z" fill="#1f4242"/>
+  <path d="M1592 0h146l90 72h-146z" fill="#f1cf65"/>
+  <path d="M1694 0h64l92 72h-64z" fill="#6ea0a0"/>
+  <path d="M1860 0h188v72h-112z" fill="#d7d1c7"/>
+  <path d="M946 9c42 4 72 15 92 31 17 13 42 17 74 11" fill="none" stroke="#8b8580" stroke-width="7" stroke-linecap="round" opacity=".45"/>
+  <path d="M1033 2c28 6 47 17 58 32 9 13 29 22 59 27" fill="none" stroke="#8b8580" stroke-width="6" stroke-linecap="round" opacity=".4"/>
+  <path d="M1346 14c34 2 54 10 60 23 6 13 29 20 70 21" fill="none" stroke="#3f6f70" stroke-width="5" stroke-linecap="round" opacity=".55"/>
+  <path d="M1406 4c45 12 70 31 75 58" fill="none" stroke="#3f6f70" stroke-width="5" stroke-linecap="round" opacity=".5"/>
+  <path d="M40 0h200l82 72H0V0z" fill="url(#speckles)" opacity=".6"/>
+  <path d="M480 0h390v72H580z" fill="url(#speckles)" opacity=".48"/>
+  <path d="M1170 0h375v72h-455z" fill="url(#speckles)" opacity=".48"/>
+  <path d="M1600 0h448v72h-350z" fill="url(#speckles)" opacity=".45"/>
+</svg>
