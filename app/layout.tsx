@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { AppShell } from "./views";
 import "./globals.css";
 
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3500";
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://www.oneteam-onegoal.com";
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
