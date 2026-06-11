@@ -13,7 +13,9 @@ import {
   Building2,
   CalendarDays,
   CheckCircle2,
+  ChevronLeft,
   ChevronRight,
+  ClipboardPaste,
   Clock3,
   CloudUpload,
   Database,
@@ -43,7 +45,8 @@ import {
 import {
   type Account,
   type AppData,
-  type Meeting
+  type Meeting,
+  type Transcript
 } from "@/lib/data";
 
 type ViewId =
@@ -71,8 +74,33 @@ const teamColors = [
 ];
 
 const MEETING_CALENDAR_YEAR = 2026;
-const FUTURE_MEETING_START = "2026-06-12";
-const FUTURE_MEETING_LABEL = "June 12, 2026";
+
+function padDatePart(value: number) {
+  return String(value).padStart(2, "0");
+}
+
+function getTodayKey() {
+  const today = new Date();
+  return `${today.getFullYear()}-${padDatePart(today.getMonth() + 1)}-${padDatePart(today.getDate())}`;
+}
+
+function monthKeyFromDateKey(dateKey: string) {
+  return dateKey.slice(0, 7);
+}
+
+function addMonths(monthKey: string, offset: number) {
+  const [year, month] = monthKey.split("-").map(Number);
+  const date = new Date(year, month - 1 + offset, 1);
+  return `${date.getFullYear()}-${padDatePart(date.getMonth() + 1)}`;
+}
+
+function formatDateLabel(dateKey: string, month: "short" | "long" = "long") {
+  return new Date(`${dateKey}T00:00:00`).toLocaleDateString("en-US", {
+    month,
+    day: "numeric",
+    year: "numeric"
+  });
+}
 
 const DashboardCharts = dynamic(
   () => import("./dashboard-charts").then((module) => module.DashboardCharts),
@@ -230,18 +258,21 @@ function SelectInput(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
 
 function PrimaryButton({
   children,
+  disabled,
   icon: Icon,
   onClick,
   type = "button"
 }: {
   children: React.ReactNode;
+  disabled?: boolean;
   icon?: LucideIcon;
   onClick?: () => void;
   type?: "button" | "submit";
 }) {
   return (
     <button
-      className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-oracle-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-oracle-600"
+      className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-oracle-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-oracle-600 disabled:cursor-not-allowed disabled:opacity-50"
+      disabled={disabled}
       onClick={onClick}
       type={type}
     >
@@ -286,10 +317,10 @@ const chatModels = [
 ];
 
 const chatSuggestions = [
-  "Create an AI Gist for Microsoft",
-  "Which accounts need attention?",
-  "What should I ask in my next customer meeting?",
-  "Summarize open risks across accounts"
+  "Create an AI Gist for Microsoft using account history, meetings, and transcript context",
+  "Summarize Amazon OCI migration risks and next best actions",
+  "Prepare Nvidia database benchmark follow-up talking points",
+  "Create a Snowflake governance roundtable brief"
 ];
 
 function TypingDots() {
@@ -538,8 +569,8 @@ function BriefSection({
     <div className="border-t border-slate-100 py-4">
       <h4 className="text-sm font-semibold text-slate-950">{title}</h4>
       <ul className="mt-2 space-y-2 text-sm leading-6 text-slate-600">
-        {items.map((item) => (
-          <li className="flex gap-2" key={item}>
+        {items.map((item, index) => (
+          <li className="flex gap-2" key={`${title}-${index}-${item}`}>
             <CheckCircle2 className="mt-1 h-4 w-4 flex-none text-emerald-600" />
             <span>{item}</span>
           </li>
@@ -549,35 +580,136 @@ function BriefSection({
   );
 }
 
-function buildBrief(account: Account, objective: string, participants: string) {
+function renderInlineMarkdown(text: string) {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+
+  return parts.map((part, index) => {
+    const boldMatch = part.match(/^\*\*([^*]+)\*\*$/);
+
+    if (boldMatch) {
+      return (
+        <strong className="font-semibold text-slate-950" key={`${part}-${index}`}>
+          {boldMatch[1]}
+        </strong>
+      );
+    }
+
+    return <span key={`${part}-${index}`}>{part}</span>;
+  });
+}
+
+function GeneratedGistText({ content }: { content: string }) {
+  return (
+    <div className="rounded-md border border-red-100 bg-red-50 p-4 text-sm leading-6 text-slate-700">
+      {content.split("\n").map((line, index) => {
+        const trimmed = line.trim();
+
+        if (!trimmed) {
+          return <div className="h-2" key={`blank-${index}`} />;
+        }
+
+        const heading = trimmed.match(/^#{1,4}\s+(.+)$/);
+        const boldHeading = trimmed.match(/^\*\*([^*]+)\*\*$/);
+        const numberedItem = trimmed.match(/^(\d+\.)\s+(.+)$/);
+        const bulletItem = trimmed.match(/^[-*]\s+(.+)$/);
+
+        if (heading || boldHeading) {
+          return (
+            <h5 className="mt-4 first:mt-0 text-base font-semibold text-slate-950" key={`heading-${index}`}>
+              {heading?.[1] ?? boldHeading?.[1]}
+            </h5>
+          );
+        }
+
+        if (numberedItem || bulletItem) {
+          return (
+            <p className="mb-2 pl-4 last:mb-0" key={`item-${index}`}>
+              {numberedItem ? <span className="mr-2 font-semibold text-slate-950">{numberedItem[1]}</span> : <span className="mr-2 text-oracle-700">-</span>}
+              {renderInlineMarkdown(numberedItem?.[2] ?? bulletItem?.[1] ?? trimmed)}
+            </p>
+          );
+        }
+
+        return (
+          <p className="mb-2 last:mb-0" key={`line-${index}`}>
+            {renderInlineMarkdown(trimmed)}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+function uniqueItems(items: string[]) {
+  return Array.from(new Set(items.map((item) => item.trim()).filter(Boolean)));
+}
+
+function populatedItems(items: string[], fallback: string[]) {
+  const unique = uniqueItems(items);
+  return unique.length ? unique : fallback;
+}
+
+function buildBrief(account: Account, objective: string, participants: string, meetings: Meeting[], transcripts: Transcript[]) {
   const participantText = participants.trim() || "customer executives and internal account team";
+  const recentMeetings = [...meetings].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 4);
+  const latestTranscript = [...transcripts].sort((a, b) => b.uploadedAt.localeCompare(a.uploadedAt))[0];
+  const meetingHighlights = recentMeetings.map((meeting) => `${meeting.date}: ${meeting.summary}`);
+  const actionItems = recentMeetings.flatMap((meeting) => meeting.actionItems);
+  const risks = recentMeetings.flatMap((meeting) => meeting.risks);
+  const meetingOpportunities = recentMeetings.flatMap((meeting) => meeting.opportunities);
+  const nextSteps = recentMeetings.flatMap((meeting) => meeting.nextSteps);
+  const stakeholders = uniqueItems([
+    ...recentMeetings.flatMap((meeting) => meeting.attendees),
+    ...recentMeetings.flatMap((meeting) => meeting.internalTeam),
+    ...participantText.split(",")
+  ]);
+  const transcriptSignals = transcripts.flatMap((transcript) => [
+    `${transcript.title}: ${transcript.extracted.summary}`,
+    ...transcript.extracted.decisions.map((decision) => `Transcript decision: ${decision}`),
+    ...transcript.extracted.actionItems.map((action) => `Transcript action: ${action}`)
+  ]);
 
   return {
     summary: [
       `${account.name} is showing strong buying signals around ${account.openOpportunities[0].toLowerCase()}.`,
       `The immediate objective is to ${objective.toLowerCase() || "align on next steps"} with ${participantText}.`,
+      latestTranscript
+        ? `Latest uploaded source: ${latestTranscript.title} highlights ${latestTranscript.extracted.summary.toLowerCase()}`
+        : `No uploaded transcript is available for ${account.name}; use account profile, meeting history, and opportunity signals as the preparation baseline.`,
       `Focus the meeting on measurable outcomes, existing technical constraints, and a clear path to executive approval.`
     ],
     background: [
       account.summary,
       `Current Oracle footprint includes ${account.currentProducts.join(", ")}.`,
-      `Strategic initiatives include ${account.strategicInitiatives.join(", ")}.`
+      `Strategic initiatives include ${account.strategicInitiatives.join(", ")}.`,
+      `Recent public signals: ${account.recentNews[0]}`
     ],
-    highlights: [
-      "Prior meetings surfaced recurring interest in governed AI, database modernization, and platform consolidation.",
-      "The account team has open threads with Sales, OCI, Database, AI, Security, and Services stakeholders.",
-      "Procurement and architecture stakeholders need a concise business case before broader commitment."
-    ],
-    actionItems: [
+    highlights: populatedItems(meetingHighlights, [
+      `No prior meeting notes are linked to ${account.name}; start from account summary, strategic initiatives, and open opportunities.`,
+      "Confirm relationship history and stakeholder priorities during the next customer conversation.",
+      "Use the meeting to create durable shared context for future account-team prep."
+    ]),
+    transcriptSignals: populatedItems(transcriptSignals, [
+      `No uploaded transcript extraction is linked to ${account.name}.`,
+      "Capture decisions, action items, and topic tags from the next customer call.",
+      "Use account profile and meeting notes until a transcript source is uploaded."
+    ]),
+    actionItems: populatedItems(actionItems, [
       `Confirm success criteria for ${account.openOpportunities[0]}.`,
       "Share a one-page reference architecture and implementation sequence.",
       "Identify executive sponsor, technical owner, and procurement approver."
-    ],
-    risks: [
+    ]),
+    risks: populatedItems(risks, [
       "Decision timeline may slip without a clearly quantified business case.",
       "Competing platform evaluations could slow alignment across technical teams.",
       "Legacy integrations may require Services support before production rollout."
-    ],
+    ]),
+    opportunities: populatedItems([...account.openOpportunities, ...meetingOpportunities], account.openOpportunities),
+    stakeholders: populatedItems(stakeholders.map((stakeholder) => `Engage ${stakeholder}`), [
+      "Economic buyer: confirm during discovery",
+      "Technical owner: confirm during discovery",
+      "Risk owner: confirm during discovery"
+    ]),
     talkingPoints: [
       `Show how ${account.oracleOpportunities[0]} supports current initiatives.`,
       "Anchor the discussion in prior customer pain points rather than product-first messaging.",
@@ -589,6 +721,11 @@ function buildBrief(account: Account, objective: string, participants: string) {
       "What data, security, or architecture constraints could block production adoption?",
       "Who needs to approve the next milestone, and what evidence do they need?"
     ],
+    followUps: populatedItems(nextSteps, [
+      "Send meeting recap within 24 hours.",
+      "Assign every action item to a named owner.",
+      "Schedule technical validation before procurement review."
+    ]),
     agenda: [
       "5 min: business objective and participant alignment",
       "10 min: recap previous decisions and open action items",
@@ -604,54 +741,103 @@ type DataProps = {
 
 export function HomeView() {
   const router = useRouter();
+  const intelligenceBlocks = [
+    {
+      title: "Account Intelligence",
+      text: "AI-ready account profiles combine priorities, opportunities, product footprint, public signals, and engagement history.",
+      icon: Building2
+    },
+    {
+      title: "Meeting Gist Generation",
+      text: "OCI GenAI turns account history, transcripts, and open actions into executive-ready preparation before the customer conversation.",
+      icon: WandSparkles
+    },
+    {
+      title: "Shared Team Context",
+      text: "Sales, OCI, AI, Database, Security, and Services teams work from one customer memory instead of scattered notes.",
+      icon: Users
+    },
+    {
+      title: "Executive Dashboard",
+      text: "Leadership gets one view of account coverage, meeting momentum, product interest, transcript ingestion, and next best actions.",
+      icon: LayoutDashboard
+    }
+  ];
 
   return (
-    <div className="flex min-h-[calc(100vh-128px)] items-center">
-      <section className="w-full py-14">
-        <Pill tone="red">OCI GenAI meeting intelligence</Pill>
-        <h1 className="mt-6 max-w-5xl text-5xl font-semibold leading-tight text-slate-950 sm:text-6xl">
-          oneteam-onegoal
-        </h1>
-        <p className="mt-4 text-2xl font-medium text-slate-800">Prepare Faster • Align Better • Win Together</p>
-        <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-600">
-          Turn account history, transcripts, and public signals into a meeting gist your whole team can trust.
-        </p>
-        <div className="mt-9 flex flex-wrap gap-3">
-          <PrimaryButton icon={WandSparkles} onClick={() => router.push("/brief")}>
-            Generate Gist
-          </PrimaryButton>
-          <SecondaryButton icon={LayoutDashboard} onClick={() => router.push("/dashboard")}>
-            View Dashboard
-          </SecondaryButton>
+    <div className="min-h-[calc(100vh-128px)] py-10">
+      <section className="grid min-h-[calc(100vh-188px)] gap-8 xl:grid-cols-[minmax(0,0.95fr)_minmax(420px,0.65fr)] xl:items-center">
+        <div>
+          <Pill tone="red">OCI GenAI meeting intelligence</Pill>
+          <p className="mt-7 text-sm font-semibold uppercase text-oracle-700">AI-Driven Account Alignment and Meeting Intelligence System</p>
+          <h1 className="mt-4 max-w-5xl text-5xl font-semibold leading-tight text-slate-950 sm:text-6xl">
+            oneteam-onegoal
+          </h1>
+          <p className="mt-5 text-2xl font-semibold text-slate-800">Teams Aligned. Meetings Prepared.</p>
+          <p className="mt-6 max-w-3xl text-lg leading-8 text-slate-700">
+            OneTeam-OneGoal combines account intelligence, meeting history, transcript extraction, and OCI GenAI into a single preparation system built for Oracle account teams.
+          </p>
+
+          <div className="mt-9 flex flex-wrap gap-3">
+            <PrimaryButton icon={WandSparkles} onClick={() => router.push("/brief")}>
+              Generate AI Gist
+            </PrimaryButton>
+            <SecondaryButton icon={LayoutDashboard} onClick={() => router.push("/dashboard")}>
+              View Dashboard
+            </SecondaryButton>
+          </div>
+
+          <div className="mt-12 grid gap-4 md:grid-cols-3">
+            {[
+              ["100", "account profiles"],
+              ["12 mo", "meeting calendar"],
+              ["OCI", "GenAI powered"]
+            ].map(([value, label]) => (
+              <div className="border-l border-oracle-200 bg-white/60 px-4 py-3" key={label}>
+                <p className="text-3xl font-semibold text-slate-950">{value}</p>
+                <p className="mt-1 text-sm font-medium text-slate-600">{label}</p>
+              </div>
+            ))}
+          </div>
         </div>
 
-        <div className="mt-14 grid gap-4 md:grid-cols-3">
-          {[
-            ["100", "accounts seeded"],
-            ["2 min", "meeting prep"],
-            ["OCI", "GenAI chat"]
-          ].map(([value, label]) => (
-            <div className="border-l border-oracle-200 pl-4" key={label}>
-              <p className="text-3xl font-semibold text-slate-950">{value}</p>
-              <p className="mt-1 text-sm font-medium text-slate-500">{label}</p>
-            </div>
-          ))}
-        </div>
-
-        <div className="mt-12 max-w-3xl rounded-lg border border-slate-200 bg-white/75 p-4 shadow-soft backdrop-blur">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="space-y-4">
+          <div className="rounded-lg border border-slate-200 bg-white/90 p-5 shadow-soft backdrop-blur">
             <div className="flex items-center gap-3">
               <span className="flex h-10 w-10 items-center justify-center rounded-md bg-red-50 text-oracle-700">
-                <MessageCircle className="h-5 w-5" />
+                <BrainCircuit className="h-5 w-5" />
               </span>
               <div>
-                <p className="text-sm font-semibold text-slate-950">Ask the assistant</p>
-                <p className="text-xs text-slate-500">Bottom-right chat, powered by OCI GenAI</p>
+                <p className="text-sm font-semibold text-slate-950">OneTeam intelligence loop</p>
+                <p className="text-xs text-slate-500">Accounts, meetings, transcripts, actions, and AI gists</p>
               </div>
             </div>
-            <SecondaryButton icon={MessageCircle} onClick={() => window.dispatchEvent(new Event("oneteam:open-chat"))}>
-              Open Chat
-            </SecondaryButton>
+            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              {intelligenceBlocks.map(({ title, text, icon: Icon }) => (
+                <div className="rounded-md border border-slate-100 bg-slate-50 p-4" key={title}>
+                  <Icon className="h-5 w-5 text-oracle-600" />
+                  <p className="mt-3 text-sm font-semibold text-slate-950">{title}</p>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">{text}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-slate-200 bg-white/80 p-4 shadow-soft backdrop-blur">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-md bg-slate-950 text-white">
+                  <MessageCircle className="h-5 w-5" />
+                </span>
+                <div>
+                  <p className="text-sm font-semibold text-slate-950">Ask the assistant</p>
+                  <p className="text-xs text-slate-500">Bottom-right chat, powered by OCI GenAI</p>
+                </div>
+              </div>
+              <SecondaryButton icon={MessageCircle} onClick={() => window.dispatchEvent(new Event("oneteam:open-chat"))}>
+                Open Chat
+              </SecondaryButton>
+            </div>
           </div>
         </div>
       </section>
@@ -737,7 +923,7 @@ function AccountHeadquartersMap({ accounts }: { accounts: Account[] }) {
     <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
       <SectionHeader
         title="U.S. account headquarters"
-        description="Customer coverage plotted from U.S. headquarters in the local SQLite account data."
+        description="Customer coverage plotted from U.S. headquarters of Accounts."
         action={
           <Pill tone="blue">
             {totalMappedAccounts} mapped accounts
@@ -850,7 +1036,10 @@ function AccountHeadquartersMap({ accounts }: { accounts: Account[] }) {
 export function DashboardView({ data }: DataProps) {
   const router = useRouter();
   const { accounts, activityFeed, meetings, productInterest, transcripts } = data;
-  const upcomingMeetings = meetings.filter((meeting) => meeting.date >= FUTURE_MEETING_START);
+  const todayKey = getTodayKey();
+  const todayLabel = formatDateLabel(todayKey);
+  const upcomingMeetings = meetings.filter((meeting) => meeting.date > todayKey);
+  const generatedGists = activityFeed.filter((activity) => /AI (brief|gist) generated/i.test(activity));
   const totalActionItems = meetings.reduce((total, meeting) => total + meeting.actionItems.length, 0);
   const meetingsByAccount = meetings.reduce((map, meeting) => {
     const accountMeetings = map.get(meeting.accountId) ?? [];
@@ -924,8 +1113,8 @@ export function DashboardView({ data }: DataProps) {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <MetricCard label="Total Accounts" value={accounts.length.toString()} delta="Loaded from local SQLite accounts" icon={Building2} tone="bg-red-50 text-oracle-700" />
         <MetricCard label="Total Meetings" value={meetings.length.toString()} delta={`${busiestMonth[1]} in busiest month (${busiestMonth[0]})`} icon={CalendarDays} tone="bg-sky-50 text-sky-700" />
-        <MetricCard label="Upcoming Meetings" value={upcomingMeetings.length.toString()} delta={`On or after ${FUTURE_MEETING_LABEL}`} icon={Clock3} tone="bg-amber-50 text-amber-700" />
-        <MetricCard label="AI Gists" value={upcomingMeetings.length.toString()} delta="Future meetings ready for prep" icon={Bot} tone="bg-emerald-50 text-emerald-700" />
+        <MetricCard label="Upcoming Meetings" value={upcomingMeetings.length.toString()} delta={`After ${todayLabel}`} icon={Clock3} tone="bg-amber-50 text-amber-700" />
+        <MetricCard label="AI Gists" value={generatedGists.length.toString()} delta="Generated briefs in activity feed" icon={Bot} tone="bg-emerald-50 text-emerald-700" />
         <MetricCard label="Open Actions" value={totalActionItems.toString()} delta="Derived from meeting action items" icon={ListChecks} tone="bg-violet-50 text-violet-700" />
       </div>
 
@@ -1291,27 +1480,103 @@ function MeetingDetail({ accounts, meeting }: { accounts: Account[]; meeting: Me
   );
 }
 
+type AddMeetingForm = {
+  accountId: string;
+  date: string;
+  title: string;
+  type: string;
+  owner: string;
+  attendees: string;
+  internalTeam: string;
+  summary: string;
+  topics: string;
+  decisions: string;
+  actionItems: string;
+  risks: string;
+  opportunities: string;
+  nextSteps: string;
+};
+
+function createAddMeetingForm(accounts: Account[], date: string): AddMeetingForm {
+  const account = accounts[0];
+
+  return {
+    accountId: account?.id ?? "",
+    date,
+    title: account ? `${account.name} Customer Alignment` : "Customer Alignment",
+    type: "Customer Meeting",
+    owner: account?.owner ?? "",
+    attendees: "",
+    internalTeam: account?.owner ?? "",
+    summary: "",
+    topics: "Business priorities, open action items, next steps",
+    decisions: "",
+    actionItems: "",
+    risks: "",
+    opportunities: "",
+    nextSteps: ""
+  };
+}
+
+function splitMeetingFormList(value: string) {
+  return value
+    .split(/\r?\n|,/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 export function MeetingsView({ data }: DataProps) {
   const router = useRouter();
   const { accounts, meetings, transcripts } = data;
-  const defaultMeeting = meetings.find((meeting) => meeting.date >= FUTURE_MEETING_START) ?? meetings[0];
-  const [selectedMeetingId, setSelectedMeetingId] = useState(defaultMeeting.id);
-  const [calendarMonth, setCalendarMonth] = useState(`${MEETING_CALENDAR_YEAR}-06`);
+  const todayKey = getTodayKey();
+  const todayLabel = formatDateLabel(todayKey);
+  const initialMeeting = meetings.find((meeting) => meeting.date > todayKey) ?? meetings[0];
+  const calendarMonths = Array.from({ length: 12 }, (_, index) => `${MEETING_CALENDAR_YEAR}-${padDatePart(index + 1)}`);
+  const currentMonthKey = monthKeyFromDateKey(todayKey);
+  const initialCalendarMonth = calendarMonths.includes(currentMonthKey)
+    ? currentMonthKey
+    : monthKeyFromDateKey(initialMeeting.date);
+  const [meetingList, setMeetingList] = useState<Meeting[]>(meetings);
+  const [selectedMeetingId, setSelectedMeetingId] = useState(initialMeeting.id);
+  const [calendarMonth, setCalendarMonth] = useState(initialCalendarMonth);
   const [fileName, setFileName] = useState("");
-  const selectedMeeting = meetings.find((meeting) => meeting.id === selectedMeetingId) ?? meetings[0];
+  const [pastedNotes, setPastedNotes] = useState("");
+  const [pasteStatus, setPasteStatus] = useState("");
+  const [addMeetingOpen, setAddMeetingOpen] = useState(false);
+  const [meetingForm, setMeetingForm] = useState(() => createAddMeetingForm(accounts, todayKey));
+  const [meetingSaveStatus, setMeetingSaveStatus] = useState("");
+  const [meetingSaveError, setMeetingSaveError] = useState("");
+  const [savingMeeting, setSavingMeeting] = useState(false);
+
+  useEffect(() => {
+    setMeetingList(meetings);
+    setSelectedMeetingId((current) => {
+      if (meetings.some((meeting) => meeting.id === current)) {
+        return current;
+      }
+
+      return (meetings.find((meeting) => meeting.date > todayKey) ?? meetings[0]).id;
+    });
+  }, [meetings, todayKey]);
+
+  const defaultMeeting = meetingList.find((meeting) => meeting.date > todayKey) ?? meetingList[0];
+  const selectedMeeting = meetingList.find((meeting) => meeting.id === selectedMeetingId) ?? defaultMeeting;
   const selectedAccount = accounts.find((account) => account.id === selectedMeeting.accountId);
-  const selectedMeetingIsFuture = selectedMeeting.date >= FUTURE_MEETING_START;
-  const calendarMonths = Array.from({ length: 12 }, (_, index) => `${MEETING_CALENDAR_YEAR}-${String(index + 1).padStart(2, "0")}`);
-  const meetingCountsByMonth = meetings.reduce((map, meeting) => {
+  const selectedMeetingIsFuture = selectedMeeting.date > todayKey;
+  const meetingCountsByMonth = meetingList.reduce((map, meeting) => {
     const monthKey = meeting.date.slice(0, 7);
     map.set(monthKey, (map.get(monthKey) ?? 0) + 1);
     return map;
   }, new Map<string, number>());
+  const previousMonth = addMonths(calendarMonth, -1);
+  const nextMonth = addMonths(calendarMonth, 1);
+  const canGoPrevious = calendarMonths.includes(previousMonth);
+  const canGoNext = calendarMonths.includes(nextMonth);
   const [year, month] = calendarMonth.split("-").map(Number);
   const monthStart = new Date(year, month - 1, 1);
   const daysInMonth = new Date(year, month, 0).getDate();
   const leadingDays = monthStart.getDay();
-  const meetingsByDate = meetings.reduce((map, meeting) => {
+  const meetingsByDate = meetingList.reduce((map, meeting) => {
     const dayMeetings = map.get(meeting.date) ?? [];
     dayMeetings.push(meeting);
     map.set(meeting.date, dayMeetings);
@@ -1344,34 +1609,149 @@ export function MeetingsView({ data }: DataProps) {
       icon: MessageSquareText
     }
   ];
+  const pastedNoteLength = pastedNotes.trim().length;
+
+  function updateMeetingForm(field: keyof AddMeetingForm, value: string) {
+    setMeetingForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function openAddMeeting() {
+    const account = selectedAccount ?? accounts[0];
+    setMeetingForm((current) => ({
+      ...current,
+      accountId: account?.id ?? current.accountId,
+      title: account ? `${account.name} Customer Alignment` : current.title,
+      owner: account?.owner ?? current.owner,
+      internalTeam: current.internalTeam.trim() ? current.internalTeam : account?.owner ?? ""
+    }));
+    setMeetingSaveError("");
+    setMeetingSaveStatus("");
+    setAddMeetingOpen(true);
+  }
+
+  async function submitAddMeeting(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setMeetingSaveError("");
+    setMeetingSaveStatus("");
+
+    if (!meetingForm.title.trim() || !meetingForm.date || !meetingForm.accountId || !meetingForm.owner.trim()) {
+      setMeetingSaveError("Title, date, account, and owner are required.");
+      return;
+    }
+
+    setSavingMeeting(true);
+
+    try {
+      const response = await fetch("/api/meetings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...meetingForm,
+          attendees: splitMeetingFormList(meetingForm.attendees),
+          internalTeam: splitMeetingFormList(meetingForm.internalTeam),
+          topics: splitMeetingFormList(meetingForm.topics),
+          decisions: splitMeetingFormList(meetingForm.decisions),
+          actionItems: splitMeetingFormList(meetingForm.actionItems),
+          risks: splitMeetingFormList(meetingForm.risks),
+          opportunities: splitMeetingFormList(meetingForm.opportunities),
+          nextSteps: splitMeetingFormList(meetingForm.nextSteps)
+        })
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error ?? "Unable to add meeting.");
+      }
+
+      const createdMeeting = result.meeting as Meeting;
+      setMeetingList((current) => (
+        [...current.filter((meeting) => meeting.id !== createdMeeting.id), createdMeeting]
+          .sort((left, right) => left.date.localeCompare(right.date))
+      ));
+      setSelectedMeetingId(createdMeeting.id);
+      setCalendarMonth(monthKeyFromDateKey(createdMeeting.date));
+      setMeetingForm(createAddMeetingForm(accounts, createdMeeting.date));
+      setMeetingSaveStatus(`Added ${createdMeeting.title}.`);
+      setAddMeetingOpen(false);
+    } catch (error) {
+      setMeetingSaveError(error instanceof Error ? error.message : "Unable to add meeting.");
+    } finally {
+      setSavingMeeting(false);
+    }
+  }
+
+  async function pasteMeetingNotesFromClipboard() {
+    setPasteStatus("");
+
+    if (!navigator.clipboard?.readText) {
+      setPasteStatus("Clipboard access is unavailable. Click the notes box and press Cmd+V.");
+      return;
+    }
+
+    try {
+      const text = await navigator.clipboard.readText();
+
+      if (!text.trim()) {
+        setPasteStatus("Clipboard is empty. Copy meeting notes, then try again.");
+        return;
+      }
+
+      setPastedNotes(text);
+      setPasteStatus("Pasted meeting notes from clipboard.");
+    } catch {
+      setPasteStatus("Browser blocked clipboard access. Click the notes box and press Cmd+V.");
+    }
+  }
 
   return (
     <div className="space-y-6">
       <SectionHeader
         eyebrow="Meetings"
         title="Meeting calendar"
-        description={`Browse all 12 months of ${MEETING_CALENDAR_YEAR}. Meetings before ${FUTURE_MEETING_LABEL} open historical notes; meetings on or after ${FUTURE_MEETING_LABEL} send teams to AI Gist prep.`}
-        action={<PrimaryButton icon={Plus}>Add Meeting</PrimaryButton>}
+        description={`Browse all 12 months of ${MEETING_CALENDAR_YEAR}. Meetings through ${todayLabel} open historical notes; meetings after ${todayLabel} send teams to AI Gist prep.`}
+        action={<PrimaryButton icon={Plus} onClick={openAddMeeting}>Add Meeting</PrimaryButton>}
       />
+      {meetingSaveStatus ? (
+        <div className="rounded-md border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">
+          {meetingSaveStatus}
+        </div>
+      ) : null}
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
         <section className="rounded-lg border border-slate-200 bg-white shadow-soft">
-          <div className="flex flex-col gap-3 border-b border-slate-200 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-4 border-b border-slate-200 p-4">
             <div>
-              <h2 className="text-base font-semibold text-slate-950">
-                {monthStart.toLocaleString("en-US", { month: "long", year: "numeric" })}
-              </h2>
-              <p className="mt-1 text-xs text-slate-500">{meetings.length} customer interactions across Jan-Dec {MEETING_CALENDAR_YEAR}</p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <Pill tone="blue">Historical notes before Jun 12</Pill>
-                <Pill tone="red">Future meetings generate AI Gist</Pill>
+              <div className="flex items-center gap-2">
+                <button
+                  aria-label="Previous month"
+                  className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={!canGoPrevious}
+                  onClick={() => setCalendarMonth(previousMonth)}
+                  type="button"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <h2 className="min-w-44 text-center text-base font-semibold text-slate-950">
+                  {monthStart.toLocaleString("en-US", { month: "long", year: "numeric" })}
+                </h2>
+                <button
+                  aria-label="Next month"
+                  className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={!canGoNext}
+                  onClick={() => setCalendarMonth(nextMonth)}
+                  type="button"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </button>
               </div>
+              <p className="mt-1 text-xs text-slate-500">{meetingList.length} customer interactions across Jan-Dec {MEETING_CALENDAR_YEAR}</p>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="overflow-x-auto pb-1">
+              <div className="grid min-w-[680px] grid-cols-12 gap-2">
               {calendarMonths.map((monthKey) => (
                 <button
                   className={cn(
-                    "min-w-14 rounded-md border px-3 py-2 text-xs font-semibold transition",
+                    "min-w-0 rounded-md border px-2 py-2 text-xs font-semibold transition",
                     calendarMonth === monthKey
                       ? "border-oracle-200 bg-oracle-50 text-oracle-700"
                       : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
@@ -1384,6 +1764,7 @@ export function MeetingsView({ data }: DataProps) {
                   <span className="mt-0.5 block text-[10px] font-medium opacity-70">{meetingCountsByMonth.get(monthKey) ?? 0}</span>
                 </button>
               ))}
+              </div>
             </div>
           </div>
 
@@ -1414,7 +1795,7 @@ export function MeetingsView({ data }: DataProps) {
                       </div>
                       <div className="mt-2 space-y-1.5">
                         {dayMeetings.map((meeting) => {
-                          const isFutureMeeting = meeting.date >= FUTURE_MEETING_START;
+                          const isFutureMeeting = meeting.date > todayKey;
 
                           return (
                             <button
@@ -1466,7 +1847,7 @@ export function MeetingsView({ data }: DataProps) {
               />
               <div className="space-y-4 text-sm leading-6 text-slate-600">
                 <div className="rounded-md border border-red-100 bg-red-50 p-4">
-                  <p className="font-semibold text-oracle-800">This meeting is on or after {FUTURE_MEETING_LABEL}.</p>
+                  <p className="font-semibold text-oracle-800">This meeting is after {todayLabel}.</p>
                   <p className="mt-2 text-oracle-800/80">
                     Use AI Gist before the customer conversation so the team walks in with historical notes, open actions,
                     public signals, and Oracle recommendations aligned.
@@ -1485,7 +1866,7 @@ export function MeetingsView({ data }: DataProps) {
               <Card>
                 <SectionHeader
                   title="Historical note"
-                  description={`${selectedAccount?.name ?? "Account"} · Captured before ${FUTURE_MEETING_LABEL}`}
+                  description={`${selectedAccount?.name ?? "Account"} · Captured on or before ${todayLabel}`}
                 />
                 <div className="space-y-3 text-sm leading-6 text-slate-600">
                   <p><span className="font-semibold text-slate-950">Summary:</span> {selectedMeeting.summary}</p>
@@ -1498,19 +1879,73 @@ export function MeetingsView({ data }: DataProps) {
 
           <Card>
             <SectionHeader title="Upload meeting source" />
-            <label className="flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center transition hover:border-oracle-300 hover:bg-red-50">
-              <CloudUpload className="h-8 w-8 text-oracle-600" />
-              <span className="mt-3 text-sm font-semibold text-slate-950">Upload Zoom notes or transcript</span>
-              <span className="mt-1 text-xs text-slate-500">TXT, DOCX, PDF, Zoom exports, call notes, or emails</span>
-              <input
-                className="sr-only"
-                onChange={(event) => setFileName(event.target.files?.[0]?.name ?? "")}
-                type="file"
-              />
-            </label>
+            <div className="space-y-4">
+              <label className="flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center transition hover:border-oracle-300 hover:bg-red-50">
+                <CloudUpload className="h-8 w-8 text-oracle-600" />
+                <span className="mt-3 text-sm font-semibold text-slate-950">Upload Zoom notes or transcript</span>
+                <span className="mt-1 text-xs text-slate-500">TXT, DOCX, PDF, Zoom exports, call notes, or emails</span>
+                <input
+                  className="sr-only"
+                  onChange={(event) => setFileName(event.target.files?.[0]?.name ?? "")}
+                  type="file"
+                />
+              </label>
+
+              <div className="rounded-lg border border-slate-200 bg-white p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-950">Paste meeting notes</p>
+                    <p className="mt-1 text-xs text-slate-500">Copy notes from email, Zoom, Slack, or a document, then paste here.</p>
+                  </div>
+                  <button
+                    className="inline-flex min-h-9 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-oracle-200 hover:bg-red-50 hover:text-oracle-700"
+                    onClick={pasteMeetingNotesFromClipboard}
+                    type="button"
+                  >
+                    <ClipboardPaste className="h-4 w-4" />
+                    Paste from clipboard
+                  </button>
+                </div>
+                <textarea
+                  className="mt-3 min-h-32 w-full resize-y rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-900 outline-none placeholder:text-slate-400 focus:border-oracle-300"
+                  onChange={(event) => {
+                    setPastedNotes(event.target.value);
+                    setPasteStatus("");
+                  }}
+                  onPaste={() => setPasteStatus("Pasted meeting notes into the notes box.")}
+                  placeholder="Paste meeting notes, transcript excerpts, decisions, action items, or customer updates..."
+                  value={pastedNotes}
+                />
+                <div className="mt-2 flex flex-col gap-2 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+                  <span>{pastedNoteLength ? `${pastedNoteLength.toLocaleString("en-US")} characters captured` : "No pasted notes yet"}</span>
+                  {pastedNotes ? (
+                    <button
+                      className="text-left font-semibold text-slate-600 transition hover:text-oracle-700 sm:text-right"
+                      onClick={() => {
+                        setPastedNotes("");
+                        setPasteStatus("");
+                      }}
+                      type="button"
+                    >
+                      Clear pasted notes
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            </div>
             {fileName ? (
               <div className="mt-4 rounded-md border border-emerald-100 bg-emerald-50 p-3 text-sm text-emerald-800">
                 Extracted summary, action items, decisions, and topics from {fileName}.
+              </div>
+            ) : null}
+            {pastedNoteLength ? (
+              <div className="mt-4 rounded-md border border-emerald-100 bg-emerald-50 p-3 text-sm text-emerald-800">
+                Captured pasted meeting notes for {selectedAccount?.name ?? "this account"}. Ready to extract summary, action items, decisions, and topics.
+              </div>
+            ) : null}
+            {pasteStatus ? (
+              <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                {pasteStatus}
               </div>
             ) : null}
           </Card>
@@ -1546,16 +1981,160 @@ export function MeetingsView({ data }: DataProps) {
           </Card>
         </section>
       </div>
+
+      {addMeetingOpen ? (
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/45 px-4 py-8">
+          <div className="w-full max-w-4xl rounded-lg border border-slate-200 bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
+              <div>
+                <p className="text-xs font-semibold uppercase text-oracle-600">Add Meeting</p>
+                <h2 className="mt-1 text-xl font-semibold text-slate-950">Create customer meeting</h2>
+                <p className="mt-1 text-sm leading-6 text-slate-600">Saved meetings are added to the local SQLite account history and become available for AI Gist prep.</p>
+              </div>
+              <button
+                aria-label="Close add meeting"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-slate-200 text-slate-500 transition hover:border-slate-300 hover:text-slate-950"
+                onClick={() => setAddMeetingOpen(false)}
+                type="button"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <form className="space-y-5 p-5" onSubmit={submitAddMeeting}>
+              <div className="grid gap-4 md:grid-cols-2">
+                <Field label="Title">
+                  <TextInput
+                    onChange={(event) => updateMeetingForm("title", event.target.value)}
+                    placeholder="Executive alignment"
+                    required
+                    value={meetingForm.title}
+                  />
+                </Field>
+                <Field label="Account">
+                  <SelectInput
+                    onChange={(event) => {
+                      const account = accounts.find((item) => item.id === event.target.value);
+                      setMeetingForm((current) => ({
+                        ...current,
+                        accountId: event.target.value,
+                        title: account ? `${account.name} Customer Alignment` : current.title,
+                        owner: account?.owner ?? current.owner,
+                        internalTeam: current.internalTeam.trim() ? current.internalTeam : account?.owner ?? ""
+                      }));
+                    }}
+                    required
+                    value={meetingForm.accountId}
+                  >
+                    {accounts.map((account) => (
+                      <option key={account.id} value={account.id}>{account.name}</option>
+                    ))}
+                  </SelectInput>
+                </Field>
+                <Field label="Date">
+                  <TextInput
+                    max={`${MEETING_CALENDAR_YEAR}-12-31`}
+                    min={`${MEETING_CALENDAR_YEAR}-01-01`}
+                    onChange={(event) => updateMeetingForm("date", event.target.value)}
+                    required
+                    type="date"
+                    value={meetingForm.date}
+                  />
+                </Field>
+                <Field label="Type">
+                  <SelectInput onChange={(event) => updateMeetingForm("type", event.target.value)} value={meetingForm.type}>
+                    <option>Customer Meeting</option>
+                    <option>Executive Briefing</option>
+                    <option>Technical Workshop</option>
+                    <option>QBR</option>
+                    <option>Architecture Review</option>
+                    <option>Renewal Review</option>
+                  </SelectInput>
+                </Field>
+                <Field label="Owner">
+                  <TextInput
+                    onChange={(event) => updateMeetingForm("owner", event.target.value)}
+                    placeholder="Account owner"
+                    required
+                    value={meetingForm.owner}
+                  />
+                </Field>
+                <Field label="Internal Team">
+                  <TextInput
+                    onChange={(event) => updateMeetingForm("internalTeam", event.target.value)}
+                    placeholder="AE, SE, AI Specialist"
+                    value={meetingForm.internalTeam}
+                  />
+                </Field>
+              </div>
+
+              <Field label="Attendees">
+                <TextInput
+                  onChange={(event) => updateMeetingForm("attendees", event.target.value)}
+                  placeholder="CIO, VP Data Platform, Security Director"
+                  value={meetingForm.attendees}
+                />
+              </Field>
+
+              <Field label="Summary">
+                <textarea
+                  className="min-h-24 w-full resize-y rounded-md border border-slate-200 bg-white px-3 py-2 text-sm leading-6 text-slate-950 placeholder:text-slate-400"
+                  onChange={(event) => updateMeetingForm("summary", event.target.value)}
+                  placeholder="What this meeting is about, or what happened if this is a historical note."
+                  value={meetingForm.summary}
+                />
+              </Field>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                {[
+                  ["topics", "Topics", "OCI roadmap, data governance, next steps"],
+                  ["decisions", "Decisions", "Decision captured, decision pending"],
+                  ["actionItems", "Action Items", "Send recap, schedule workshop"],
+                  ["risks", "Risks", "Security review, migration timeline"],
+                  ["opportunities", "Opportunities", "OCI expansion, AI Vector Search pilot"],
+                  ["nextSteps", "Next Steps", "Confirm owners, schedule follow-up"]
+                ].map(([field, label, placeholder]) => (
+                  <Field key={field} label={label}>
+                    <textarea
+                      className="min-h-24 w-full resize-y rounded-md border border-slate-200 bg-white px-3 py-2 text-sm leading-6 text-slate-950 placeholder:text-slate-400"
+                      onChange={(event) => updateMeetingForm(field as keyof AddMeetingForm, event.target.value)}
+                      placeholder={`${placeholder} (comma or new line separated)`}
+                      value={meetingForm[field as keyof AddMeetingForm]}
+                    />
+                  </Field>
+                ))}
+              </div>
+
+              {meetingSaveError ? (
+                <div className="rounded-md border border-red-100 bg-red-50 px-4 py-3 text-sm font-medium text-oracle-800">
+                  {meetingSaveError}
+                </div>
+              ) : null}
+
+              <div className="flex flex-col-reverse gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:items-center sm:justify-end">
+                <SecondaryButton onClick={() => setAddMeetingOpen(false)}>Cancel</SecondaryButton>
+                <PrimaryButton disabled={savingMeeting} icon={savingMeeting ? Loader2 : Plus} type="submit">
+                  {savingMeeting ? "Adding..." : "Add Meeting"}
+                </PrimaryButton>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
 export function BriefGeneratorView({ data }: DataProps) {
-  const { accounts, meetings } = data;
+  const { accounts, meetings, transcripts } = data;
   const [selectedAccountId, setSelectedAccountId] = useState(accounts[0].id);
   const [objective, setObjective] = useState("Align on AI knowledge layer pilot and next-step owners");
   const [participants, setParticipants] = useState("CIO, VP Data Platform, Security Director, Oracle AE, AI Specialist");
   const [meetingDate, setMeetingDate] = useState("2026-06-18");
-  const [generated, setGenerated] = useState(true);
+  const [generated, setGenerated] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [aiGist, setAiGist] = useState("");
+  const [gistProvider, setGistProvider] = useState("OCI GenAI");
+  const [gistError, setGistError] = useState("");
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -1577,7 +2156,73 @@ export function BriefGeneratorView({ data }: DataProps) {
   }, [accounts, meetings]);
 
   const selected = accounts.find((account) => account.id === selectedAccountId) ?? accounts[0];
-  const brief = buildBrief(selected, objective, participants);
+  const relatedMeetings = meetings.filter((meeting) => meeting.accountId === selected.id);
+  const relatedTranscripts = transcripts.filter((transcript) => transcript.accountId === selected.id);
+  const brief = buildBrief(selected, objective, participants, relatedMeetings, relatedTranscripts);
+
+  useEffect(() => {
+    setGenerated(false);
+    setAiGist("");
+    setGistError("");
+  }, [selectedAccountId, objective, participants, meetingDate]);
+
+  async function generateAiGist() {
+    if (generating) {
+      return;
+    }
+
+    setGenerating(true);
+    setGenerated(false);
+    setAiGist("");
+    setGistError("");
+
+    const message = [
+      `Create an AI Gist for ${selected.name}.`,
+      `Meeting date: ${meetingDate}.`,
+      `Meeting objective: ${objective}.`,
+      `Participants: ${participants}.`,
+      "Use the application account, meeting, and transcript context for this customer.",
+      "If a source is missing for this account, populate the section from account profile, opportunities, initiatives, and reasonable next-step assumptions instead of leaving it blank.",
+      "Return only the final AI Gist with these concise executive sections: Executive Summary, Customer Context, Risks, Opportunities, Recommended Talking Points, Suggested Questions, and Next Actions."
+    ].join("\n");
+
+    try {
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          message,
+          model: "oci-llama",
+          history: []
+        })
+      });
+      const result = (await response.json()) as { response?: string; provider?: string; error?: string };
+
+      if (!response.ok) {
+        throw new Error(result.error || "AI Gist generation failed.");
+      }
+
+      const responseText = result.response || "";
+
+      if (/OCI GenAI chat is wired in|server still needs OCI credentials/i.test(responseText)) {
+        throw new Error(responseText);
+      }
+
+      if (!responseText.trim()) {
+        throw new Error("OCI GenAI returned an empty gist.");
+      }
+
+      setAiGist(responseText);
+      setGistProvider(result.provider || "OCI GenAI");
+      setGenerated(true);
+    } catch (error) {
+      setGistError(error instanceof Error ? error.message : "AI Gist generation failed.");
+    } finally {
+      setGenerating(false);
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -1623,8 +2268,8 @@ export function BriefGeneratorView({ data }: DataProps) {
               />
             </Field>
 
-            <PrimaryButton icon={Sparkles} onClick={() => setGenerated(true)}>
-              Generate AI Gist
+            <PrimaryButton disabled={generating} icon={generating ? Loader2 : Sparkles} onClick={generateAiGist}>
+              {generating ? "Generating..." : "Generate AI Gist"}
             </PrimaryButton>
           </div>
 
@@ -1649,21 +2294,48 @@ export function BriefGeneratorView({ data }: DataProps) {
 
           {generated ? (
             <div>
+              <div className="border-t border-slate-100 py-4">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <h4 className="text-sm font-semibold text-slate-950">Generated Gist</h4>
+                  <span className="text-[10px] font-semibold uppercase text-slate-400">{gistProvider}</span>
+                </div>
+                <GeneratedGistText content={aiGist} />
+              </div>
+            </div>
+          ) : gistError ? (
+            <div>
+              <div className="border-t border-slate-100 py-4">
+                <div className="rounded-md border border-red-100 bg-red-50 p-4 text-sm leading-6 text-oracle-800">
+                  {gistError}
+                </div>
+              </div>
               <BriefSection title="Executive Summary" items={brief.summary} />
               <BriefSection title="Customer Background" items={brief.background} />
               <BriefSection title="Previous Meeting Highlights" items={brief.highlights} />
+              <BriefSection title="Transcript Signals" items={brief.transcriptSignals} />
               <BriefSection title="Open Action Items" items={brief.actionItems} />
-              <BriefSection title="Current Opportunities" items={selected.openOpportunities} />
-              <BriefSection title="Stakeholders" items={["Economic buyer: CIO", "Technical owner: VP Data Platform", "Risk owner: Security Director"]} />
+              <BriefSection title="Current Opportunities" items={brief.opportunities} />
+              <BriefSection title="Stakeholders" items={brief.stakeholders} />
               <BriefSection title="Risks" items={brief.risks} />
               <BriefSection title="Recent Public News" items={selected.recentNews} />
               <BriefSection title="Recommended Talking Points" items={brief.talkingPoints} />
               <BriefSection title="Potential Oracle Solutions" items={brief.solutions} />
               <BriefSection title="Suggested Questions" items={brief.questions} />
-              <BriefSection title="Follow-Up Recommendations" items={["Send meeting recap within 24 hours.", "Assign every action item to a named owner.", "Schedule technical validation before procurement review."]} />
+              <BriefSection title="Follow-Up Recommendations" items={brief.followUps} />
               <BriefSection title="AI Generated Meeting Agenda" items={brief.agenda} />
             </div>
-          ) : null}
+          ) : (
+            <div className="border-t border-slate-100 py-8 text-center">
+              {generating ? (
+                <div className="flex flex-col items-center gap-3 text-sm text-slate-600">
+                  <Loader2 className="h-5 w-5 animate-spin text-oracle-600" />
+                  Generating with LLaMA 4 Maverick on OCI GenAI...
+                </div>
+              ) : (
+                <p className="text-sm text-slate-500">Choose the meeting inputs, then generate the AI Gist.</p>
+              )}
+            </div>
+          )}
         </section>
       </div>
     </div>

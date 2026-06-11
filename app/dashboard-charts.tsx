@@ -8,7 +8,6 @@ import type { Account, Meeting, ProductInterest, Transcript } from "@/lib/data";
 
 const chartColors = ["#C74634", "#2563eb", "#059669", "#d97706", "#7c3aed", "#475569"];
 const meetingCalendarYear = 2026;
-const futureMeetingStart = "2026-06-12";
 
 Highcharts.setOptions({
   colors: chartColors,
@@ -67,12 +66,23 @@ function getMonthKeys() {
   });
 }
 
+function getTodayKey() {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, "0");
+  const day = String(today.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function countByMonth(items: string[]) {
   return getMonthKeys().map(({ key }) => items.filter((date) => date.slice(0, 7) === key).length);
 }
 
 function getPipelineOptions(meetings: Meeting[], transcripts: Transcript[]): Options {
   const monthKeys = getMonthKeys();
+  const todayKey = getTodayKey();
+  const historicalMeetings = meetings.filter((meeting) => meeting.date <= todayKey);
+  const futureMeetings = meetings.filter((meeting) => meeting.date > todayKey);
 
   return {
     ...baseChart,
@@ -126,8 +136,13 @@ function getPipelineOptions(meetings: Meeting[], transcripts: Transcript[]): Opt
       },
       {
         type: "column",
-        name: "AI Gists",
-        data: countByMonth(meetings.filter((meeting) => meeting.date >= futureMeetingStart).map((meeting) => meeting.date))
+        name: "Historical Notes",
+        data: countByMonth(historicalMeetings.map((meeting) => meeting.date))
+      },
+      {
+        type: "column",
+        name: "Future Prep Ready",
+        data: countByMonth(futureMeetings.map((meeting) => meeting.date))
       },
       {
         type: "column",

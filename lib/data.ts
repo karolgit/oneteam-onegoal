@@ -694,16 +694,25 @@ const syntheticOpportunities = [
   ["Oracle Analytics", "Data platform modernization"]
 ];
 
+function getTodayKey() {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, "0");
+  const day = String(today.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function generateSyntheticMeetings(): Meeting[] {
   const meetingsPerMonth = 12;
   const dayPattern = [3, 5, 7, 10, 13, 16, 18, 21, 24, 26, 28, 30];
+  const todayKey = getTodayKey();
 
   return Array.from({ length: 12 }).flatMap((_, monthIndex) =>
     Array.from({ length: meetingsPerMonth }).map((__, meetingIndex) => {
       const accountIndex = (monthIndex * meetingsPerMonth + meetingIndex * 7) % accounts.length;
       const account = accounts[accountIndex];
       const date = `2026-${String(monthIndex + 1).padStart(2, "0")}-${String(dayPattern[meetingIndex]).padStart(2, "0")}`;
-      const isFutureMeeting = date >= "2026-06-12";
+      const isFutureMeeting = date > todayKey;
       const themeIndex = (monthIndex + meetingIndex) % syntheticTopics.length;
       const title = `${account.name} ${syntheticMeetingTitles[(monthIndex + meetingIndex) % syntheticMeetingTitles.length]}`;
       const internalTeam = syntheticTeams[themeIndex];

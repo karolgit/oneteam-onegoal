@@ -305,6 +305,74 @@ function initializeDatabase() {
   return database;
 }
 
+export type NewMeetingInput = Omit<Meeting, "id">;
+
+function createMeetingId() {
+  return `mtg-user-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export function createMeeting(input: NewMeetingInput): Meeting {
+  const database = initializeDatabase();
+  const account = database.prepare("SELECT id FROM accounts WHERE id = ?").get(input.accountId);
+
+  if (!account) {
+    throw new Error("Account not found.");
+  }
+
+  const meeting: Meeting = {
+    id: createMeetingId(),
+    title: input.title,
+    date: input.date,
+    accountId: input.accountId,
+    attendees: input.attendees,
+    internalTeam: input.internalTeam,
+    type: input.type,
+    summary: input.summary,
+    topics: input.topics,
+    decisions: input.decisions,
+    actionItems: input.actionItems,
+    risks: input.risks,
+    opportunities: input.opportunities,
+    nextSteps: input.nextSteps,
+    owner: input.owner
+  };
+
+  const insertMeeting = database.prepare(`
+    INSERT INTO meetings (
+      id, title, date, account_id, attendees, internal_team, type, summary, topics,
+      decisions, action_items, risks, opportunities, next_steps, owner
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  insertMeeting.run(
+    meeting.id,
+    meeting.title,
+    meeting.date,
+    meeting.accountId,
+    stringify(meeting.attendees),
+    stringify(meeting.internalTeam),
+    meeting.type,
+    meeting.summary,
+    stringify(meeting.topics),
+    stringify(meeting.decisions),
+    stringify(meeting.actionItems),
+    stringify(meeting.risks),
+    stringify(meeting.opportunities),
+    stringify(meeting.nextSteps),
+    meeting.owner
+  );
+
+  database.prepare(`
+    UPDATE accounts
+    SET meetings_count = meetings_count + 1,
+        action_items_open = action_items_open + ?
+    WHERE id = ?
+  `).run(meeting.actionItems.length, meeting.accountId);
+
+  return meeting;
+}
+
 function readAccounts(database: DatabaseSync): Account[] {
   const rows = database.prepare("SELECT * FROM accounts ORDER BY name ASC").all() as Record<string, unknown>[];
 
