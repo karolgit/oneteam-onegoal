@@ -2,10 +2,8 @@ import type { Metadata } from "next";
 import { AppShell } from "./views";
 import "./globals.css";
 
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://www.oneteam-onegoal.com";
-
 export const metadata: Metadata = {
-  metadataBase: new URL(siteUrl),
+  metadataBase: new URL("https://www.oneteam-onegoal.com"),
   applicationName: "oneteam-onegoal",
   title: {
     default: "oneteam-onegoal",
